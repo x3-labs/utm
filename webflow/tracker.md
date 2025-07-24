@@ -18,7 +18,7 @@ Webflow Analytics Script - это продвинутый JavaScript-скрипт
 
 ```html
 <!-- Webflow Analytics Script -->
-<script src="https://cdn.jsdelivr.net/gh/webflow/tracker@1.0.0/tracker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/utm/webflow/tracker.min.js"></script>
 ```
 
 ## Конфигурация
@@ -148,7 +148,7 @@ const CONFIG = {
 
 ```html
 <!-- Webflow Analytics Script -->
-<script src="https://cdn.jsdelivr.net/gh/webflow/tracker@1.0.0/tracker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/utm/webflow/tracker.min.js"></script>
 ```
 
 ### Работа с динамическими формами
@@ -338,10 +338,10 @@ localStorage.getItem('wf_analytics_session');
 
 ```html
 <!-- Фиксированная версия (рекомендуется для production) -->
-<script src="https://cdn.jsdelivr.net/gh/webflow/tracker@1.0.0/tracker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/utm/webflow/tracker.min.js"></script>
 
 <!-- Последняя версия (автоматические обновления) -->
-<script src="https://cdn.jsdelivr.net/gh/webflow/tracker@latest/tracker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/utm/webflow/tracker.min.js"></script>
 ```
 
 ### Процесс обновления

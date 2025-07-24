@@ -30,7 +30,7 @@ Webflow Webhook Analytics Script (webhook.js) - это продвинутый **
 
 ```html
 <!-- Webflow Webhook Analytics Script -->
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 ```
 
 ### Способ 2: Встроенный код
@@ -42,7 +42,7 @@ Webflow Webhook Analytics Script (webhook.js) - это продвинутый **
 1. **Создайте GitHub репозиторий** с именем `webflow-tracker`
 2. **Загрузите файл** `webhook.js` в корень репозитория
 3. **Создайте релиз** с тегом `v1.0.0`
-4. **Используйте URL:** `https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js`
+4. **Используйте URL:** `https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js`
 
 **Структура репозитория:**
 ```
@@ -95,13 +95,13 @@ webflow-tracker/
 **Project Settings > Custom Code > Before </body> tag:**
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 ```
 
 **Или для разработки (с отладкой):**
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 <script>
   // Включить отладку
   WebflowAnalytics.setDebugMode(true);
@@ -539,10 +539,10 @@ console.log(WebflowAnalytics.getData());
 
 ```html
 <!-- Фиксированная версия (рекомендуется для production) -->
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 
 <!-- Последняя версия (автоматические обновления) -->
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@latest/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@latest/webhook.min.js"></script>
 ```
 
 ### Процесс обновления
@@ -550,7 +550,7 @@ console.log(WebflowAnalytics.getData());
 1. **Обновите файл webhook.js** в GitHub репозитории
 2. **Создайте новый релиз** с тегом версии (например, v1.1.0)
 3. **Обновите ссылку** в проекте на новую версию
-4. **Очистите кеш jsDelivr** (опционально): `https://purge.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js`
+4. **Очистите кеш jsDelivr** (опционально): `https://purge.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js`
 
 ### Преимущества версионирования
 
@@ -576,7 +576,7 @@ console.log(WebflowAnalytics.getData());
 
 ```html
 <!-- Webflow Webhook Analytics Script -->
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 ```
 
 ### Способ 2: Встроенный код
@@ -588,7 +588,7 @@ console.log(WebflowAnalytics.getData());
 1. **Создайте GitHub репозиторий** с именем `webflow-tracker`
 2. **Загрузите файл** `webhook.js` в корень репозитория
 3. **Создайте релиз** с тегом `v1.0.0`
-4. **Используйте URL:** `https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js`
+4. **Используйте URL:** `https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js`
 
 **Структура репозитория:**
 ```
@@ -641,13 +641,13 @@ webflow-tracker/
 **Project Settings > Custom Code > Before </body> tag:**
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 ```
 
 **Или для разработки (с отладкой):**
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 <script>
   // Включить отладку
   WebflowAnalytics.setDebugMode(true);
@@ -1088,10 +1088,10 @@ console.log(WebflowAnalytics.getData());
 
 ```html
 <!-- Фиксированная версия (рекомендуется для production) -->
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js"></script>
 
 <!-- Последняя версия (автоматические обновления) -->
-<script src="https://cdn.jsdelivr.net/gh/your-username/webflow-tracker@latest/webhook.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/webflow-tracker@latest/webhook.min.js"></script>
 ```
 
 ### Процесс обновления
@@ -1099,7 +1099,7 @@ console.log(WebflowAnalytics.getData());
 1. **Обновите файл webhook.js** в GitHub репозитории
 2. **Создайте новый релиз** с тегом версии (например, v1.1.0)
 3. **Обновите ссылку** в проекте на новую версию
-4. **Очистите кеш jsDelivr** (опционально): `https://purge.jsdelivr.net/gh/your-username/webflow-tracker@1.0.0/webhook.js`
+4. **Очистите кеш jsDelivr** (опционально): `https://purge.jsdelivr.net/gh/x3-labs/webflow-tracker@1.0.0/webhook.min.js`
 
 ### Преимущества версионирования
 

@@ -1,174 +1,105 @@
 var Webflow = Webflow || [];
 Webflow.push(function() {  
-  // unbind webflow form handling (keep this if you only want to affect specific forms)
-  $(document).off('submit');
+  // Unbind Webflow's default form handling
+  $(document).off('submit', 'form');
   
-  // Helper function for safe URL encoding
-  function safeEncodeURIComponent(value) {
-    try {
-      return encodeURIComponent(value || '');
-    } catch (e) {
-      return '';
-    }
-  }
-  
-  // Helper function for safe cookie extraction
-  function getCookieValue(cookieName) {
-    try {
-      const cookies = document.cookie.split(';');
-      for (let cookie of cookies) {
-        const trimmedCookie = cookie.trim();
-        if (trimmedCookie.startsWith(cookieName + '=')) {
-          return trimmedCookie.substring(cookieName.length + 1);
-        }
-      }
-      return '';
-    } catch (e) {
-      return '';
-    }
-  }
-  
-  // Helper function for extracting GA Client ID (supports both Universal Analytics and GA4)
-  function getGAClientId() {
-    try {
-      // Try GA4 first (_ga_<MEASUREMENT_ID>)
-      const ga4Cookie = document.cookie.split(';').find(cookie => 
-        cookie.trim().match(/^_ga_[A-Z0-9]+=/));
-      if (ga4Cookie) {
-        const cookieParts = ga4Cookie.split('=');
-        if (cookieParts.length >= 2 && cookieParts[1]) {
-          const parts = cookieParts[1].split('.');
-          if (parts.length >= 4) {
-            return parts[2] + '.' + parts[3];
-          }
-        }
-      }
-      
-      // Fallback to Universal Analytics (_ga)
-      const gaCookie = getCookieValue('_ga');
-      if (gaCookie) {
-        const parts = gaCookie.split('.');
-        if (parts.length >= 4) {
-          return parts[2] + '.' + parts[3];
-        }
-      }
-      
-      return '';
-    } catch (e) {
-      return '';
-    }
-  }
-  
-  /* Any form on the page */
+  // Handle form submission
   $('form').submit(function(e) {
     e.preventDefault();
-    
     const $form = $(this); // The submitted form
-    const $submit = $('[type=submit]', $form); // Submit button of form
+    const $submit = $form.find('[type=submit]'); // Submit button of form
     const buttonText = $submit.val(); // Original button text
     const buttonWaitingText = $submit.attr('data-wait'); // Waiting button text value
-    const formMethod = $form.attr('method') || 'POST'; // Form method (default POST)
-    const formAction = $form.attr('action'); // Form action URL
+    const formMethod = $form.attr('method') || 'POST'; // Default to POST if not set
+    const formAction = $form.attr('action'); // Form action
     const formRedirect = $form.attr('data-redirect'); // Form redirect location
-    
-    // Validate required form attributes
+
+    // Validate form action
     if (!formAction) {
-      console.error('Form action attribute is required');
-      return false;
+      console.error('Form action is missing');
+      $form.siblings('.w-form-fail').show();
+      $form.siblings('.w-form-done').hide();
+      return;
     }
-    
+
     let formData = $form.serialize(); // Form data
-    
-    try {
-      // Extracting UTM parameters from URL
-      const urlParams = new URLSearchParams(window.location.search);
-      const utmSource = urlParams.get('utm_source') || '';
-      const utmMedium = urlParams.get('utm_medium') || '';
-      const utmCampaign = urlParams.get('utm_campaign') || '';
-      const utmContent = urlParams.get('utm_content') || '';
-      const utmTerm = urlParams.get('utm_term') || '';
-      
-      // Extracting additional tracking parameters from URL
-      const gclid = urlParams.get('gclid') || '';
-      const fbclid = urlParams.get('fbclid') || '';
-      const ttclid = urlParams.get('ttclid') || '';
-      
-      // Adding UTM parameters to form data with proper encoding
-      if (utmSource) formData += `&utm_source=${safeEncodeURIComponent(utmSource)}`;
-      if (utmMedium) formData += `&utm_medium=${safeEncodeURIComponent(utmMedium)}`;
-      if (utmCampaign) formData += `&utm_campaign=${safeEncodeURIComponent(utmCampaign)}`;
-      if (utmContent) formData += `&utm_content=${safeEncodeURIComponent(utmContent)}`;
-      if (utmTerm) formData += `&utm_term=${safeEncodeURIComponent(utmTerm)}`;
-      
-      // Adding tracking click IDs to form data with proper encoding
-      if (gclid) formData += `&gclid=${safeEncodeURIComponent(gclid)}`;
-      if (fbclid) formData += `&fbclid=${safeEncodeURIComponent(fbclid)}`;
-      if (ttclid) formData += `&ttclid=${safeEncodeURIComponent(ttclid)}`;
-      
-      // Adding form name to form data
-      const formDataName = $form.attr('data-name');
-      if (formDataName) {
-        formData += `&formName=${safeEncodeURIComponent(formDataName)}`;
+    // Extract UTM and additional parameters from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const utmSource = urlParams.get('utm_source') || '';
+    const utmMedium = urlParams.get('utm_medium') || '';
+    const utmCampaign = urlParams.get('utm_campaign') || '';
+    const utmContent = urlParams.get('utm_content') || '';
+    const utmTerm = urlParams.get('utm_term') || '';
+    const gclid = urlParams.get('gclid') || '';
+    const fbclid = urlParams.get('fbclid') || '';
+    const ttclid = urlParams.get('ttclid') || '';
+    // Extract fbp and fbc from cookies or URL
+    const fbpCookie = document.cookie.split(';').find(cookie => cookie.trim().startsWith('_fbp='));
+    const fbcCookie = document.cookie.split(';').find(cookie => cookie.trim().startsWith('_fbc='));
+    const fbp = fbpCookie ? fbpCookie.split('=')[1] : urlParams.get('fbp') || '';
+    const fbc = fbcCookie ? fbcCookie.split('=')[1] : urlParams.get('fbc') || '';
+
+    // Add parameters to form data
+    formData += `&utm_source=${encodeURIComponent(utmSource)}&utm_medium=${encodeURIComponent(utmMedium)}&utm_campaign=${encodeURIComponent(utmCampaign)}&utm_content=${encodeURIComponent(utmContent)}&utm_term=${encodeURIComponent(utmTerm)}`;
+    formData += `&gclid=${encodeURIComponent(gclid)}&fbclid=${encodeURIComponent(fbclid)}&ttclid=${encodeURIComponent(ttclid)}&fbp=${encodeURIComponent(fbp)}&fbc=${encodeURIComponent(fbc)}`;
+
+    // Add form name to form data
+    const formDataName = $form.attr('data-name') || '';
+    formData += `&formName=${encodeURIComponent(formDataName)}`;
+
+    // Add current page URL to form data
+    const currentPageURL = window.location.href.split('?')[0];
+    formData += `&pageURL=${encodeURIComponent(currentPageURL)}`;
+
+    // Extract Google Analytics Client ID
+    const gaCookie = document.cookie.split(';').find(cookie => cookie.trim().startsWith('_ga='));
+    let clientId = '';
+    if (gaCookie) {
+      const parts = gaCookie.split('.');
+      if (parts.length >= 4) {
+        clientId = parts[2] + '.' + parts[3];
       }
-      
-      // Adding current page URL to form data
-      const currentPageURL = window.location.href.split('?')[0]; // Get URL without parameters
-      if (currentPageURL) {
-        formData += `&pageURL=${safeEncodeURIComponent(currentPageURL)}`;
-      }
-      
-      // Adding Google Analytics Client ID to form data
-      const clientId = getGAClientId();
-      if (clientId) {
-        formData += `&gaClientId=${safeEncodeURIComponent(clientId)}`;
-      }
-      
-      // Extracting Facebook pixel parameters from cookies
-      const fbp = getCookieValue('_fbp');
-      const fbc = getCookieValue('_fbc');
-      
-      // Adding Facebook pixel parameters to form data
-      if (fbp) formData += `&fbp=${safeEncodeURIComponent(fbp)}`;
-      if (fbc) formData += `&fbc=${safeEncodeURIComponent(fbc)}`;
-      
-    } catch (error) {
-      console.warn('Error extracting tracking parameters:', error);
-      // Continue with form submission even if tracking parameter extraction fails
     }
-    
+    formData += `&gaClientId=${encodeURIComponent(clientId)}`;
+
     // Set waiting text
     if (buttonWaitingText) {
       $submit.val(buttonWaitingText); 
     }
-    
-    // Disable submit button to prevent double submission
-    $submit.prop('disabled', true);
-    
-    $.ajax(formAction, {
+
+    $.ajax({
+      url: formAction,
       data: formData,
       method: formMethod,
-      timeout: 30000 // 30 second timeout
+      dataType: 'json' // Expect JSON response from Webflow
     })
     .done((res) => {
-      // If form redirect setting set, then use this and prevent any other actions
+      // Handle redirect if set
       if (formRedirect) { 
-        window.location = formRedirect; 
-        return; 
+        try {
+          new URL(formRedirect); // Validate URL
+          window.location = formRedirect; 
+          return; 
+        } catch (err) {
+          console.error('Invalid redirect URL:', formRedirect);
+        }
       }
-      $form
-        .hide() // optional hiding of form
-        .siblings('.w-form-done').show() // Show success
-        .siblings('.w-form-fail').hide(); // Hide failure
+      // Show Webflow success state
+      $form.hide();
+      $form.siblings('.w-form-done').show();
+      $form.siblings('.w-form-fail').hide();
     })
     .fail((res) => {
+      // Show Webflow failure state
       console.error('Form submission failed:', res);
-      $form
-        .siblings('.w-form-done').hide() // Hide success
-        .siblings('.w-form-fail').show(); // show failure
+      $form.siblings('.w-form-done').hide();
+      $form.siblings('.w-form-fail').show();
     })
     .always(() => {
-      // Reset button text and re-enable
-      $submit.val(buttonText).prop('disabled', false);
+      // Reset button text
+      if (buttonWaitingText) {
+        $submit.val(buttonText);
+      }
     });
   });
 });

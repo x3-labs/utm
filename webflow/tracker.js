@@ -1,105 +1,116 @@
-(function() {
+(function () {
   'use strict';
 
   // Защита от повторной инициализации
-  if (window.webflowAnalyticsInitialized) {
+  if (window.wf_webflowAnalyticsInitialized) {
     return;
   }
-  window.webflowAnalyticsInitialized = true;
+  window.wf_webflowAnalyticsInitialized = true;
 
   // Конфигурация
   const CONFIG = {
-    STORAGE_KEY: "wf_analytics_data",
-    SESSION_KEY: "wf_analytics_session",
+    STORAGE_KEY: 'wf_analytics_data',
+    SESSION_KEY: 'wf_analytics_session',
     STORAGE_EXPIRY: 30 * 24 * 60 * 60 * 1000, // 30 дней
     SESSION_TIMEOUT: 30 * 60 * 1000, // 30 минут
     DEBUG_MODE: false,
-    MAX_PAGES_TRACKED: 100
+    MAX_PAGES_TRACKED: 100,
+    INIT_LOAD_DELAY_MS: 50 // задержка дополнительной инициализации после load
   };
 
-  // Безопасное логирование
-  function safeLog(message, data = null) {
+  // Безопасное логирование (DEBUG_MODE=false по умолчанию)
+  function safeLog(message, data) {
     if (CONFIG.DEBUG_MODE && typeof console !== 'undefined') {
       try {
-        console.log('[Webflow Analytics]', message, data || '');
-      } catch (e) {
-        // Игнорируем ошибки логирования
-      }
+        console.log('[wf-analytics]', message, data || '');
+      } catch (e) {}
     }
   }
 
-  // Проверка поддержки localStorage
+  // Проверка поддержки localStorage (без выбрасывания исключений)
   function isStorageSupported() {
     try {
-      if (typeof Storage === 'undefined' || typeof localStorage === 'undefined') {
-        return false;
-      }
-      const test = '__storage_test__';
-      localStorage.setItem(test, 'test');
-      localStorage.removeItem(test);
+      if (typeof Storage === 'undefined' || typeof localStorage === 'undefined') return false;
+      const testKey = '__wf_storage_test__';
+      localStorage.setItem(testKey, '1');
+      localStorage.removeItem(testKey);
       return true;
     } catch (e) {
       return false;
     }
   }
 
-  // Утилиты (объявляем первыми для использования в других модулях)
+  // Утилиты
   const Utils = {
-    getUrlParams: function() {
+    getUrlParams: function () {
       try {
-        return new URLSearchParams(window.location.search);
-      } catch (error) {
-        return new URLSearchParams();
+        return new URLSearchParams(window.location.search || '');
+      } catch (e) {
+        // Фолбэк на ручный парсинг (очень старые браузеры)
+        const params = new URLSearchParams();
+        try {
+          const q = (window.location.search || '').replace(/^\?/, '');
+          q.split('&').forEach(pair => {
+            if (!pair) return;
+            const [k, v] = pair.split('=').map(decodeURIComponent);
+            params.set(k, v || '');
+          });
+        } catch (ee) {}
+        return params;
       }
     },
 
-    getCleanUrl: function() {
+    getCleanUrl: function () {
       try {
-        const url = new URL(window.location.href);
-        return url.origin + url.pathname;
-      } catch (error) {
+        const u = new URL(window.location.href);
+        return u.origin + u.pathname;
+      } catch (e) {
         return window.location.href;
       }
     },
 
-    getFullCleanUrl: function(allParams) {
+    getFullCleanUrl: function (excludeParams) {
       try {
-        const url = new URL(window.location.href);
-        if (allParams && Array.isArray(allParams)) {
-          allParams.forEach(param => url.searchParams.delete(param));
+        const u = new URL(window.location.href);
+        if (excludeParams && Array.isArray(excludeParams)) {
+          excludeParams.forEach(p => u.searchParams.delete(p));
         }
-        return url.href;
-      } catch (error) {
+        return u.href;
+      } catch (e) {
         return window.location.href;
       }
     },
 
-    getBrowserLanguage: function() {
+    getBrowserLanguage: function () {
       try {
-        return navigator.language || navigator.userLanguage || navigator.browserLanguage || '';
-      } catch (error) {
+        return navigator.language || navigator.userLanguage || '';
+      } catch (e) {
         return '';
       }
     },
 
-    debounce: function(func, wait) {
-      let timeout;
-      return function executedFunction(...args) {
-        const later = () => {
-          clearTimeout(timeout);
-          func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
+    debounce: function (fn, wait) {
+      let t;
+      return function () {
+        const args = arguments;
+        clearTimeout(t);
+        t = setTimeout(() => fn.apply(this, args), wait);
       };
+    },
+
+    safeMatchCookie: function (pattern) {
+      try {
+        return document.cookie ? document.cookie.match(pattern) : null;
+      } catch (e) {
+        return null;
+      }
     }
   };
 
-  // Безопасные операции с localStorage
+  // Безопасные операции с localStorage (все операции — no-throw)
   const Storage = {
-    set: function(key, data, expiry = null) {
+    set: function (key, data, expiry) {
       if (!isStorageSupported()) return false;
-      
       try {
         const item = {
           data: data,
@@ -108,19 +119,13 @@
         };
         localStorage.setItem(key, JSON.stringify(item));
         return true;
-      } catch (error) {
-        safeLog("Ошибка сохранения в localStorage:", error);
-        
-        // Безопасная очистка только наших ключей при переполнении
+      } catch (e) {
+        safeLog('Storage.set error:', e);
+        // Пытаемся аккуратно освободить только наши ключи и повторить
         try {
-          // Удаляем только наши ключи
-          [CONFIG.STORAGE_KEY, CONFIG.SESSION_KEY].forEach(ourKey => {
-            try {
-              localStorage.removeItem(ourKey);
-            } catch (e) {}
+          [CONFIG.STORAGE_KEY, CONFIG.SESSION_KEY].forEach(k => {
+            try { localStorage.removeItem(k); } catch (ee) {}
           });
-          
-          // Пытаемся сохранить снова
           const item = {
             data: data,
             timestamp: Date.now(),
@@ -128,402 +133,355 @@
           };
           localStorage.setItem(key, JSON.stringify(item));
           return true;
-        } catch (secondError) {
+        } catch (e2) {
           return false;
         }
       }
     },
 
-    get: function(key) {
+    get: function (key) {
       if (!isStorageSupported()) return null;
-      
       try {
-        const item = localStorage.getItem(key);
-        if (!item) return null;
-        
-        const parsedItem = JSON.parse(item);
-        
-        if (!parsedItem || typeof parsedItem !== 'object' || !('data' in parsedItem)) {
-          localStorage.removeItem(key);
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || !('data' in parsed)) {
+          try { localStorage.removeItem(key); } catch (ee) {}
           return null;
         }
-        
-        if (parsedItem.expiry && Date.now() > parsedItem.expiry) {
-          localStorage.removeItem(key);
+        if (parsed.expiry && Date.now() > parsed.expiry) {
+          try { localStorage.removeItem(key); } catch (ee) {}
           return null;
         }
-        
-        return parsedItem.data;
-      } catch (error) {
-        safeLog("Ошибка чтения localStorage:", error);
-        try {
-          localStorage.removeItem(key);
-        } catch (e) {}
+        return parsed.data;
+      } catch (e) {
+        safeLog('Storage.get error:', e);
+        try { localStorage.removeItem(key); } catch (ee) {}
         return null;
       }
     },
 
-    remove: function(key) {
+    remove: function (key) {
       if (!isStorageSupported()) return;
-      try {
-        localStorage.removeItem(key);
-      } catch (e) {}
+      try { localStorage.removeItem(key); } catch (e) {}
     }
   };
 
-  // Получение Client ID из cookies
+  // Получение Client ID из cookies (всё в try/catch)
   const ClientIds = {
-    google: function() {
+    google: function () {
       try {
-        const match = document.cookie.match(/_ga=GA\d\.\d\.([\d\.]+)/);
-        return match ? match[1] : null;
-      } catch (error) {
-        return null;
-      }
+        const m = Utils.safeMatchCookie(/_ga=GA\d+\.\d+\.(\d+\.\d+|\d+)/);
+        return m ? m[1] : null;
+      } catch (e) { return null; }
     },
-
-    yandex: function() {
+    yandex: function () {
       try {
-        const match = document.cookie.match(/_ym_uid=(\d+)/);
-        return match ? match[1] : null;
-      } catch (error) {
-        return null;
-      }
+        const m = Utils.safeMatchCookie(/_ym_uid=(\d+)/);
+        return m ? m[1] : null;
+      } catch (e) { return null; }
     },
-
-    facebook: function() {
+    facebook: function () {
       try {
-        const match = document.cookie.match(/_fbp=([^;]+)/);
-        return match ? match[1] : null;
-      } catch (error) {
-        return null;
-      }
+        const m = Utils.safeMatchCookie(/_fbp=([^;]+)/);
+        return m ? m[1] : null;
+      } catch (e) { return null; }
     },
-
-    pinterest: function() {
+    pinterest: function () {
       try {
-        // Сначала URL параметры
-        const urlParams = Utils.getUrlParams();
-        const urlValue = urlParams.get('epik');
-        if (urlValue && urlValue.trim()) {
-          return urlValue.trim();
-        }
-        
-        // Затем cookie
-        const match = document.cookie.match(/_epik=([^;]+)/);
-        return match ? match[1] : null;
-      } catch (error) {
-        return null;
-      }
+        const params = Utils.getUrlParams();
+        const urlValue = params.get('epik');
+        if (urlValue && urlValue.trim()) return urlValue.trim();
+        const m = Utils.safeMatchCookie(/_epik=([^;]+)/);
+        return m ? m[1] : null;
+      } catch (e) { return null; }
     }
   };
 
-  // Управление сессией
+  // Менеджер сессии
   const SessionManager = {
-    init: function() {
+    init: function () {
       const currentUrl = Utils.getCleanUrl();
-      const currentTime = Date.now();
-      
+      const now = Date.now();
+
       let sessionData = Storage.get(CONFIG.SESSION_KEY);
-      
-      // Проверяем валидность существующей сессии
-      if (!sessionData || !sessionData.startTime || !Array.isArray(sessionData.pagesViewed)) {
-        sessionData = null;
-      }
-      
-      // Проверяем тайм-аут сессии
-      if (sessionData && sessionData.lastActivity && 
-          (currentTime - sessionData.lastActivity) > CONFIG.SESSION_TIMEOUT) {
+
+      try {
+        if (!sessionData || !sessionData.startTime || !Array.isArray(sessionData.pagesViewed)) {
+          sessionData = null;
+        } else if (sessionData.lastActivity && (now - sessionData.lastActivity) > CONFIG.SESSION_TIMEOUT) {
+          sessionData = null;
+        }
+      } catch (e) {
         sessionData = null;
       }
 
       if (!sessionData) {
-        // Новая сессия
         sessionData = {
-          startTime: currentTime,
+          startTime: now,
           pagesViewed: [currentUrl],
-          lastActivity: currentTime
+          lastActivity: now
         };
-        safeLog("Новая сессия создана");
+        safeLog('New session created');
       } else {
-        // Обновляем существующую сессию
         if (!sessionData.pagesViewed.includes(currentUrl)) {
           sessionData.pagesViewed.push(currentUrl);
-          
-          // Ограничиваем количество отслеживаемых страниц
           if (sessionData.pagesViewed.length > CONFIG.MAX_PAGES_TRACKED) {
             sessionData.pagesViewed = sessionData.pagesViewed.slice(-CONFIG.MAX_PAGES_TRACKED);
           }
         }
-        sessionData.lastActivity = currentTime;
-        safeLog("Сессия обновлена");
+        sessionData.lastActivity = now;
+        safeLog('Session updated');
       }
 
-      // Сохраняем сессию
-      Storage.set(CONFIG.SESSION_KEY, sessionData, currentTime + CONFIG.SESSION_TIMEOUT);
+      Storage.set(CONFIG.SESSION_KEY, sessionData, now + CONFIG.SESSION_TIMEOUT);
       return sessionData;
     },
 
-    getMetrics: function() {
-      const sessionData = Storage.get(CONFIG.SESSION_KEY);
-      
-      if (!sessionData || !sessionData.startTime || !Array.isArray(sessionData.pagesViewed)) {
-        return {
-          pages_viewed: 1,
-          session_duration: 0
-        };
+    getMetrics: function () {
+      try {
+        const sessionData = Storage.get(CONFIG.SESSION_KEY);
+        if (!sessionData || !sessionData.startTime || !Array.isArray(sessionData.pagesViewed)) {
+          return { pages_viewed: 1, session_duration: 0 };
+        }
+        const duration = Math.round((Date.now() - sessionData.startTime) / 1000);
+        return { pages_viewed: sessionData.pagesViewed.length, session_duration: Math.max(0, duration) };
+      } catch (e) {
+        return { pages_viewed: 1, session_duration: 0 };
       }
-
-      const sessionDuration = Math.round((Date.now() - sessionData.startTime) / 1000);
-      
-      return {
-        pages_viewed: sessionData.pagesViewed.length,
-        session_duration: Math.max(0, sessionDuration)
-      };
     }
   };
 
-  // Управление параметрами отслеживания
+  // TrackingManager (сохранение UTM + click IDs)
   const TrackingManager = {
-    utmParams: ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"],
-    clickIdParams: [
-      "gclid", "fbclid", "ttclid", "yclid", 
-      "msclkid", "twclid", "li_fat_id", "awclid", "rdt_cid", "irclickid"
-    ],
-    facebookParams: ["fbp", "fbc"],
+    utmParams: ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'],
+    clickIdParams: ['gclid', 'fbclid', 'ttclid', 'yclid', 'msclkid', 'twclid', 'li_fat_id', 'awclid', 'rdt_cid', 'irclickid'],
+    facebookParams: ['fbp', 'fbc'],
     allParams: [],
     savedData: {},
 
-    init: function() {
-      const urlParams = Utils.getUrlParams();
-      
-      // Формируем список всех параметров
-      this.allParams = [...this.utmParams, ...this.clickIdParams, ...this.facebookParams, 'epik'];
-      
-      // Получаем сохраненные данные
-      this.savedData = Storage.get(CONFIG.STORAGE_KEY) || {};
-      
-      // Собираем новые параметры из URL
-      const newParams = {};
-      let hasNewParams = false;
-      
-      // Проверяем стандартные параметры
-      [...this.utmParams, ...this.clickIdParams, ...this.facebookParams].forEach(param => {
-        const value = urlParams.get(param);
-        if (value && value.trim()) {
-          newParams[param] = value.trim();
-          hasNewParams = true;
+    init: function () {
+      try {
+        this.allParams = [...this.utmParams, ...this.clickIdParams, ...this.facebookParams, 'epik'];
+        this.savedData = Storage.get(CONFIG.STORAGE_KEY) || {};
+
+        const params = Utils.getUrlParams();
+        const newParams = {};
+        let hasNew = false;
+
+        [...this.utmParams, ...this.clickIdParams, ...this.facebookParams].forEach(p => {
+          const v = params.get(p);
+          if (v && v.trim()) {
+            newParams[p] = v.trim();
+            hasNew = true;
+          }
+        });
+
+        const pinterestId = ClientIds.pinterest();
+        if (pinterestId) {
+          newParams.epik = pinterestId;
+          hasNew = true;
         }
-      });
-      
-      // Проверяем Pinterest Click ID (комбинированный подход)
-      const pinterestId = ClientIds.pinterest();
-      if (pinterestId) {
-        newParams.epik = pinterestId;
-        hasNewParams = true;
-      }
-      
-      // Обновляем данные при наличии новых параметров
-      if (hasNewParams) {
-        Object.assign(this.savedData, newParams);
-        
-        const now = new Date().toISOString();
-        const pageUrl = Utils.getFullCleanUrl(this.allParams);
-        
-        if (!this.savedData.first_visit_timestamp) {
-          this.savedData.first_visit_timestamp = now;
-          this.savedData.first_visit_page = pageUrl;
+
+        if (hasNew) {
+          Object.assign(this.savedData, newParams);
+          const nowIso = new Date().toISOString();
+          const pageUrl = Utils.getFullCleanUrl(this.allParams);
+
+          if (!this.savedData.first_visit_timestamp) {
+            this.savedData.first_visit_timestamp = nowIso;
+            this.savedData.first_visit_page = pageUrl;
+          }
+          this.savedData.last_visit_timestamp = nowIso;
+          this.savedData.last_visit_page = pageUrl;
+
+          Storage.set(CONFIG.STORAGE_KEY, this.savedData);
+          safeLog('Tracking params updated', newParams);
         }
-        
-        this.savedData.last_visit_timestamp = now;
-        this.savedData.last_visit_page = pageUrl;
-        
-        Storage.set(CONFIG.STORAGE_KEY, this.savedData);
-        safeLog("Параметры отслеживания обновлены:", newParams);
+      } catch (e) {
+        safeLog('TrackingManager.init error', e);
       }
-      
       return this;
     },
 
-    getFinalData: function() {
-      const urlParams = Utils.getUrlParams();
-      const finalData = Object.assign({}, this.savedData);
-      
-      // URL параметры имеют приоритет
-      [...this.utmParams, ...this.clickIdParams, ...this.facebookParams].forEach(param => {
-        const urlValue = urlParams.get(param);
-        if (urlValue && urlValue.trim()) {
-          finalData[param] = urlValue.trim();
-        }
-      });
-      
-      // Pinterest ID (комбинированный подход)
-      const pinterestId = ClientIds.pinterest();
-      if (pinterestId) {
-        finalData.epik = pinterestId;
+    getFinalData: function () {
+      try {
+        const params = Utils.getUrlParams();
+        const finalData = Object.assign({}, this.savedData || {});
+
+        [...this.utmParams, ...this.clickIdParams, ...this.facebookParams].forEach(p => {
+          const v = params.get(p);
+          if (v && v.trim()) finalData[p] = v.trim();
+        });
+
+        const pinterestId = ClientIds.pinterest();
+        if (pinterestId) finalData.epik = pinterestId;
+
+        return finalData;
+      } catch (e) {
+        safeLog('TrackingManager.getFinalData error', e);
+        return this.savedData || {};
       }
-      
-      return finalData;
     }
   };
 
-  // Управление формами
+  // FormManager — безопасное заполнение скрытых полей
   const FormManager = {
-    init: function() {
+    init: function () {
       this.initExistingForms();
       this.setupFormWatcher();
       this.setupSubmitHandler();
     },
 
-    initExistingForms: function() {
+    initExistingForms: function () {
       const self = this;
-      
-      // Инициализация существующих форм с задержкой для Webflow
-      const initForms = function() {
+      const initForms = function () {
         try {
-          const forms = document.querySelectorAll('form');
-          forms.forEach(form => self.fillHiddenFields(form));
-          safeLog(`Инициализировано ${forms.length} форм`);
-        } catch (error) {
-          safeLog("Ошибка инициализации форм:", error);
+          const forms = document.querySelectorAll && document.querySelectorAll('form') || [];
+          forms.forEach(f => {
+            try { self.fillHiddenFields(f); } catch (e) { safeLog('fillHiddenFields error', e); }
+          });
+          safeLog(`Initialized ${forms.length} forms`);
+        } catch (e) {
+          safeLog('initExistingForms error', e);
         }
       };
 
-      // Множественная инициализация для совместимости с Webflow
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initForms);
       } else {
         initForms();
       }
-      
-      // Дополнительная инициализация через таймауты
+      // Дополнительные попытки (совместимость с Webflow)
       setTimeout(initForms, 100);
       setTimeout(initForms, 500);
     },
 
-    setupFormWatcher: function() {
+    setupFormWatcher: function () {
       const self = this;
-      
-      // Отслеживание новых форм (для динамического контента Webflow)
-      if (typeof MutationObserver !== 'undefined') {
-        const debouncedCallback = Utils.debounce(function(mutations) {
-          mutations.forEach(function(mutation) {
-            if (mutation.type === 'childList') {
-              mutation.addedNodes.forEach(function(node) {
-                if (node.nodeType === 1) { // Element node
+      if (typeof MutationObserver === 'undefined') return;
+      try {
+        const debounced = Utils.debounce(function (mutations) {
+          try {
+            mutations.forEach(function (m) {
+              if (m.type === 'childList') {
+                m.addedNodes.forEach(function (node) {
+                  if (!node || node.nodeType !== 1) return;
                   if (node.tagName === 'FORM') {
-                    self.fillHiddenFields(node);
+                    try { self.fillHiddenFields(node); } catch (e) { safeLog('fillHiddenFields error', e); }
                   } else if (node.querySelectorAll) {
                     const forms = node.querySelectorAll('form');
-                    forms.forEach(function(form) {
-                      self.fillHiddenFields(form);
+                    forms.forEach(function (f) {
+                      try { self.fillHiddenFields(f); } catch (e) { safeLog('fillHiddenFields error', e); }
                     });
                   }
-                }
-              });
-            }
-          });
-        }, 100);
+                });
+              }
+            });
+          } catch (e) { safeLog('MutationObserver callback error', e); }
+        }, 150);
 
-        const observer = new MutationObserver(debouncedCallback);
-        observer.observe(document.body, {
-          childList: true,
-          subtree: true
-        });
+        const observer = new MutationObserver(debounced);
+        observer.observe(document.body, { childList: true, subtree: true });
+      } catch (e) {
+        safeLog('setupFormWatcher error', e);
       }
     },
 
-    setupSubmitHandler: function() {
+    setupSubmitHandler: function () {
       const self = this;
-      
-      // Обработчик отправки форм
-      document.addEventListener('submit', function(event) {
-        if (event.target && event.target.tagName === 'FORM') {
-          self.fillHiddenFields(event.target);
-        }
-      }, true);
+      try {
+        document.addEventListener('submit', function (ev) {
+          try {
+            if (ev && ev.target && ev.target.tagName === 'FORM') {
+              self.fillHiddenFields(ev.target);
+            }
+          } catch (e) {}
+        }, true);
+      } catch (e) {
+        safeLog('setupSubmitHandler error', e);
+      }
     },
 
-    fillField: function(form, selector, value) {
+    fillField: function (form, selector, value) {
       try {
+        if (!form || typeof form.querySelector !== 'function') return false;
         const input = form.querySelector(selector);
-        if (input && (input.type === 'hidden' || input.style.display === 'none')) {
-          input.value = String(value || '');
-          return true;
+        if (input) {
+          try {
+            // Если это input/textarea/select — устанавливаем value; если стоит атрибут value он будет корректно передан
+            if ('value' in input) {
+              input.value = value != null ? String(value) : '';
+            } else {
+              // fallback для произвольных элементов
+              input.setAttribute('value', value != null ? String(value) : '');
+            }
+            return true;
+          } catch (e) {
+            return false;
+          }
         }
         return false;
-      } catch (error) {
+      } catch (e) {
         return false;
       }
     },
 
-    fillHiddenFields: function(form) {
-      if (!form || typeof form.querySelector !== 'function') {
-        return;
-      }
-
+    fillHiddenFields: function (form) {
+      if (!form || typeof form.querySelector !== 'function') return;
       try {
-        // Проверяем, что TrackingManager инициализирован
-        if (!window.trackingManager || typeof window.trackingManager.getFinalData !== 'function') {
-          safeLog("TrackingManager не инициализирован");
+        // используем wf_trackingManager если есть, иначе — fallback на глобал старого имени (не перезаписываем)
+        const tm = (window.wf_trackingManager && typeof window.wf_trackingManager.getFinalData === 'function')
+          ? window.wf_trackingManager
+          : (window.trackingManager && typeof window.trackingManager.getFinalData === 'function' ? window.trackingManager : null);
+
+        if (!tm) {
+          safeLog('No tracking manager available, skipping form fill');
           return;
         }
 
-        const trackingData = window.trackingManager.getFinalData();
+        const trackingData = tm.getFinalData();
         const sessionMetrics = SessionManager.getMetrics();
-        const pageUrl = Utils.getFullCleanUrl(window.trackingManager.allParams);
-        
-        // UTM параметры
-        window.trackingManager.utmParams.forEach(param => {
-          this.fillField(form, `.${param}`, trackingData[param]);
-        });
-        
-        // Click ID параметры
-        window.trackingManager.clickIdParams.forEach(param => {
-          this.fillField(form, `.${param}`, trackingData[param]);
-        });
-        
-        // Facebook параметры
-        window.trackingManager.facebookParams.forEach(param => {
-          this.fillField(form, `.${param}`, trackingData[param]);
-        });
-        
-        // Pinterest Click ID
+        const pageUrl = Utils.getFullCleanUrl((tm.allParams) ? tm.allParams : []);
+
+        // UTM
+        (tm.utmParams || []).forEach(p => this.fillField(form, `.${p}`, trackingData[p]));
+        // Click IDs
+        (tm.clickIdParams || []).forEach(p => this.fillField(form, `.${p}`, trackingData[p]));
+        // Facebook
+        (tm.facebookParams || []).forEach(p => this.fillField(form, `.${p}`, trackingData[p]));
+        // Pinterest
         this.fillField(form, '.epik', trackingData.epik);
-        
+
         // Основные поля
         this.fillField(form, '.page_url', pageUrl);
-        this.fillField(form, '.referer', document.referrer);
-        this.fillField(form, '.user_agent', navigator.userAgent);
+        this.fillField(form, '.referer', document.referrer || '');
+        this.fillField(form, '.user_agent', navigator.userAgent || '');
         this.fillField(form, '.timestamp', new Date().toISOString());
-        
-        // Имя формы
-        const formName = form.getAttribute('data-name') || 
-                        form.getAttribute('name') || 
-                        form.id || 
-                        form.className || '';
+
+        // Форм-название / идентификатор
+        const formName = form.getAttribute('data-name') || form.getAttribute('name') || form.id || form.className || '';
         this.fillField(form, '.form_name', formName);
-        
-        // Client ID
+
+        // Client IDs
         this.fillField(form, '.google_client_id', ClientIds.google());
         this.fillField(form, '.yandex_client_id', ClientIds.yandex());
         this.fillField(form, '.facebook_browser_id', ClientIds.facebook());
-        
-        // Информация о визитах
+
+        // Посещения
         this.fillField(form, '.first_visit_timestamp', trackingData.first_visit_timestamp);
         this.fillField(form, '.last_visit_timestamp', trackingData.last_visit_timestamp);
         this.fillField(form, '.first_visit_page', trackingData.first_visit_page);
         this.fillField(form, '.last_visit_page', trackingData.last_visit_page);
-        
-        // Метрики сессии
+
+        // Сессия
         this.fillField(form, '.pages_viewed', sessionMetrics.pages_viewed);
         this.fillField(form, '.session_duration', sessionMetrics.session_duration);
-        
-        // Язык браузера
+
+        // Язык
         this.fillField(form, '.browser_language', Utils.getBrowserLanguage());
-        
-      } catch (error) {
-        safeLog("Ошибка заполнения полей формы:", error);
+      } catch (e) {
+        safeLog('fillHiddenFields top error', e);
       }
     }
   };
@@ -531,80 +489,122 @@
   // Флаг инициализации
   let initialized = false;
 
-  // Основная инициализация
+  // Основная инициализация (защищённая)
   function init() {
     if (initialized) {
-      safeLog("Инициализация уже выполнена, пропускаем");
+      safeLog('Already initialized, skipping');
       return;
     }
-    
     initialized = true;
-    
+
     try {
-      safeLog("Инициализация Webflow Analytics...");
-      
-      // Инициализируем сессию
+      safeLog('Initializing wf Webflow Analytics...');
+      // Сессия
       SessionManager.init();
-      
-      // Инициализируем отслеживание параметров (сохраняем в глобальную переменную)
-      window.trackingManager = TrackingManager.init();
-      
+
+      // Инициализируем trackingManager, не перезаписывая чужие глобалы
+      try {
+        if (!window.wf_trackingManager) {
+          // Если есть сторонний trackingManager с совместимым API — используем его как fallback, но не перезаписываем
+          if (window.trackingManager && typeof window.trackingManager.getFinalData === 'function') {
+            window.wf_trackingManager = window.trackingManager;
+          } else {
+            window.wf_trackingManager = TrackingManager.init();
+          }
+        } else {
+          // Если wf_trackingManager уже есть — попытка инициализировать внутреннее состояние
+          try { window.wf_trackingManager = Object.assign(window.wf_trackingManager, TrackingManager.init()); } catch (e) {}
+        }
+      } catch (e) {
+        safeLog('trackingManager init error (swallowed)', e);
+        try { window.wf_trackingManager = TrackingManager.init(); } catch (ee) {}
+      }
+
       // Инициализируем формы
       FormManager.init();
-      
-      safeLog("Webflow Analytics успешно инициализирован");
-      
-    } catch (error) {
-      safeLog("Критическая ошибка инициализации:", error);
-      // Сбрасываем флаг при ошибке, чтобы можно было попробовать снова
-      initialized = false;
+
+      safeLog('wf Webflow Analytics initialized');
+    } catch (e) {
+      safeLog('Critical init error (swallowed):', e);
+      initialized = false; // позволим попытке повториться
     }
   }
 
-  // Публичные функции для отладки
-  window.getWebflowAnalyticsData = function() {
-    try {
-      return {
-        tracking_data: window.trackingManager ? window.trackingManager.getFinalData() : {},
-        session_metrics: SessionManager.getMetrics(),
-        client_ids: {
-          google: ClientIds.google(),
-          yandex: ClientIds.yandex(),
-          facebook: ClientIds.facebook(),
-          pinterest: ClientIds.pinterest()
-        },
-        browser_language: Utils.getBrowserLanguage(),
-        page_url: window.trackingManager ? Utils.getFullCleanUrl(window.trackingManager.allParams) : window.location.href,
-        storage_supported: isStorageSupported()
-      };
-    } catch (error) {
-      return { error: "Ошибка получения данных" };
-    }
-  };
+  // Публичные функции — назначаем только если не присутствуют (чтобы не перезаписывать Binotel или другие)
+  if (!window.getWebflowAnalyticsData && !window.getWfAnalyticsData) {
+    window.getWfAnalyticsData = function () {
+      try {
+        const tm = (window.wf_trackingManager && typeof window.wf_trackingManager.getFinalData === 'function')
+          ? window.wf_trackingManager
+          : (window.trackingManager && typeof window.trackingManager.getFinalData === 'function' ? window.trackingManager : null);
 
-  window.initWebflowAnalyticsForForm = function(form) {
-    try {
-      if (form && typeof form.querySelector === 'function') {
-        FormManager.fillHiddenFields(form);
-        return true;
+        return {
+          tracking_data: tm ? tm.getFinalData() : {},
+          session_metrics: SessionManager.getMetrics(),
+          client_ids: {
+            google: ClientIds.google(),
+            yandex: ClientIds.yandex(),
+            facebook: ClientIds.facebook(),
+            pinterest: ClientIds.pinterest()
+          },
+          browser_language: Utils.getBrowserLanguage(),
+          page_url: tm ? Utils.getFullCleanUrl(tm.allParams) : window.location.href,
+          storage_supported: isStorageSupported()
+        };
+      } catch (e) {
+        return { error: 'Ошибка получения данных' };
       }
-      return false;
-    } catch (error) {
-      safeLog("Ошибка инициализации формы:", error);
-      return false;
-    }
-  };
-
-  // Запуск инициализации
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    };
   } else {
-    init();
+    // Если есть getWebflowAnalyticsData — оставляем его, но создаём наш алиас
+    if (!window.getWfAnalyticsData) {
+      window.getWfAnalyticsData = window.getWebflowAnalyticsData || function () { return { error: 'No data' }; };
+    }
   }
 
-  // Webflow-совместимая инициализация
-  if (typeof window.Webflow !== 'undefined') {
-    window.Webflow.push(init);
+  if (!window.initWebflowAnalyticsForForm && !window.initWfAnalyticsForForm) {
+    window.initWfAnalyticsForForm = function (form) {
+      try {
+        if (form && typeof form.querySelector === 'function') {
+          FormManager.fillHiddenFields(form);
+          return true;
+        }
+        return false;
+      } catch (e) {
+        safeLog('initWebflowAnalyticsForForm error', e);
+        return false;
+      }
+    };
   }
+
+  // Безопасный старт: DOMContentLoaded (как раньше)
+  function safeInitWrapper() {
+    try { init(); } catch (e) { safeLog('safeInitWrapper error', e); }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', safeInitWrapper);
+  } else {
+    safeInitWrapper();
+  }
+
+  // Дополнительная попытка после полной загрузки, с небольшой задержкой — это снижает race conditions с async виджетами (например Binotel)
+  try {
+    window.addEventListener('load', function () {
+      try {
+        if (!initialized) {
+          setTimeout(safeInitWrapper, CONFIG.INIT_LOAD_DELAY_MS);
+        }
+      } catch (e) { safeLog('load listener error', e); }
+    });
+  } catch (e) {}
+
+  // Webflow-совместимая интеграция (если Webflow предоставляет push)
+  try {
+    if (typeof window.Webflow !== 'undefined' && Array.isArray(window.Webflow.push)) {
+      // Не перезаписываем Webflow API, просто пушим инициализацию
+      window.Webflow.push(safeInitWrapper);
+    }
+  } catch (e) {}
 
 })();

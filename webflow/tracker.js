@@ -11,9 +11,7 @@
     STORAGE_EXPIRY_MS: 30 * 24 * 60 * 60 * 1000 // 30 дней
   };
 
-  function safeLog() {
-    // DEBUG отключён — ничего не логируем
-  }
+  function noop() {} // DEBUG отключён
 
   function isStorageSupported() {
     try {
@@ -32,15 +30,22 @@
       try {
         return new URLSearchParams(window.location.search || '');
       } catch (e) {
-        // минимальный fallback
-        const params = new URLSearchParams();
+        // Простейший fallback: парсим вручную
+        const params = new (function () {
+          const map = {};
+          this.get = function (k) { return map.hasOwnProperty(k) ? map[k] : null; };
+          this.set = function (k, v) { map[k] = v; };
+          this.has = function (k) { return map.hasOwnProperty(k); };
+        })();
+
         try {
           const q = (window.location.search || '').replace(/^\?/, '');
+          if (!q) return params;
           q.split('&').forEach(pair => {
             if (!pair) return;
             const idx = pair.indexOf('=');
             if (idx === -1) params.set(decodeURIComponent(pair), '');
-            else params.set(decodeURIComponent(pair.slice(0, idx)), decodeURIComponent(pair.slice(idx + 1)));
+            else params.set(decodeURIComponent(pair.slice(0, idx)), decodeURIComponent(pair.slice(idx + 1) || ''));
           });
         } catch (ee) {}
         return params;
@@ -49,14 +54,41 @@
 
     getPageUrlWithoutParams: function (excludeParams) {
       try {
-        const u = new URL(window.location.href);
-        if (excludeParams && Array.isArray(excludeParams)) {
-          excludeParams.forEach(p => u.searchParams.delete(p));
+        if (typeof URL === 'function') {
+          const u = new URL(window.location.href);
+          if (excludeParams && Array.isArray(excludeParams)) {
+            excludeParams.forEach(p => u.searchParams.delete(p));
+          }
+          // Возвращаем origin + pathname + (если остались другие параметры) search + hash (без utm-параметров)
+          return (u.origin || (u.protocol + '//' + u.host)) + u.pathname + (u.search || '') + (u.hash || '');
+        } else {
+          // fallback для старых браузеров — удаляем параметры руками
+          const loc = window.location;
+          const origin = loc.origin || (loc.protocol + '//' + loc.host);
+          const pathname = loc.pathname || '';
+          const hash = loc.hash || '';
+          const search = (loc.search || '').replace(/^\?/, '');
+          if (!search) return origin + pathname + hash;
+          try {
+            const pairs = search.split('&').filter(Boolean);
+            const out = pairs.filter(p => {
+              const k = p.split('=')[0];
+              return !(excludeParams && excludeParams.indexOf(k) !== -1);
+            });
+            return origin + pathname + (out.length ? ('?' + out.join('&')) : '') + hash;
+          } catch (e) {
+            return origin + pathname + hash;
+          }
         }
-        return u.origin + u.pathname + (u.search ? u.search : '');
       } catch (e) {
-        // fallback: strip search manually
-        return window.location.origin ? (window.location.origin + window.location.pathname) : (window.location.protocol + '//' + window.location.host + window.location.pathname);
+        try {
+          // максимально безопасный fallback
+          const loc = window.location;
+          const origin = loc.origin || (loc.protocol + '//' + loc.host);
+          return origin + (loc.pathname || '') + (loc.hash || '');
+        } catch (ee) {
+          return window.location.href;
+        }
       }
     },
 
@@ -66,7 +98,9 @@
       } catch (e) {
         return null;
       }
-    }
+    },
+
+    trim: function (v) { return typeof v === 'string' ? v.trim() : v; }
   };
 
   const Storage = {
@@ -87,7 +121,6 @@
         }
       }
     },
-
     get: function () {
       if (!isStorageSupported()) return null;
       try {
@@ -110,186 +143,116 @@
     }
   };
 
-  // Чтение client id для Google Analytics (_ga cookie)
+  // чтение Google client id (_ga)
   function readGoogleClientIdFromCookie() {
     try {
-      // ожидаем формат: _ga=GA1.2.123456789.1234567890
+      // формат _ga=GA1.2.123456789.1234567890
       const m = Utils.safeCookieMatch(/_ga=GA\d+\.\d+\.(\d+\.\d+|\d+)/);
-      return m ? m[1] : null;
-    } catch (e) {
-      return null;
-    }
+      return m ? Utils.trim(m[1]) : null;
+    } catch (e) { return null; }
   }
 
-  // Какие параметры мы сохраняем (минимум, по запросу)
   const FIELDS = {
     utm: ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'],
     clicks: ['gclid', 'fbclid', 'ttclid'],
     fb: ['fbp', 'fbc']
   };
 
-  // Инициализация: читаем из URL и cookies, сохраняем в localStorage
   function initTrackingData() {
     try {
       const urlParams = Utils.getUrlParams();
       const stored = Storage.get() || {};
 
-      // считываем UTM
+      // utm
       FIELDS.utm.forEach(k => {
-        const v = urlParams.get(k);
-        if (v && v.trim()) stored[k] = v.trim();
+        const v = urlParams.get ? urlParams.get(k) : null;
+        if (v && String(v).trim()) stored[k] = String(v).trim();
       });
 
-      // click IDs
+      // clicks
       FIELDS.clicks.forEach(k => {
-        const v = urlParams.get(k);
-        if (v && v.trim()) stored[k] = v.trim();
+        const v = urlParams.get ? urlParams.get(k) : null;
+        if (v && String(v).trim()) stored[k] = String(v).trim();
       });
 
-      // fb params (url or cookie)
+      // fb via url or cookie
       FIELDS.fb.forEach(k => {
-        const v = urlParams.get(k);
-        if (v && v.trim()) stored[k] = v.trim();
+        const v = urlParams.get ? urlParams.get(k) : null;
+        if (v && String(v).trim()) stored[k] = String(v).trim();
       });
-      // если fbp/fbc не в URL — попробовать cookie
+
       if (!stored.fbp) {
         const m = Utils.safeCookieMatch(/_fbp=([^;]+)/);
-        if (m && m[1]) stored.fbp = m[1];
+        if (m && m[1]) stored.fbp = Utils.trim(m[1]);
       }
       if (!stored.fbc) {
         const m2 = Utils.safeCookieMatch(/_fbc=([^;]+)/);
-        if (m2 && m2[1]) stored.fbc = m2[1];
+        if (m2 && m2[1]) stored.fbc = Utils.trim(m2[1]);
       }
 
-      // google client id из cookie
+      // google client id
       const ga = readGoogleClientIdFromCookie();
       if (ga) stored.google_client_id = ga;
 
-      // page_url: текущая страница без перечисленных UTM/click/fb парамет (чтобы очистить UTM)
-      const exclude = [...FIELDS.utm, ...FIELDS.clicks, ...FIELDS.fb, 'epik'];
+      // page_url — без UTM/click/fb параметров
+      const exclude = [].concat(FIELDS.utm, FIELDS.clicks, FIELDS.fb, ['epik']);
       stored.page_url = Utils.getPageUrlWithoutParams(exclude);
 
-      // Сохраняем (подменяем старые значения только если есть)
       Storage.set(stored);
-
       return stored;
     } catch (e) {
-      safeLog('initTrackingData error', e);
       return Storage.get() || {};
     }
   }
 
-  // Возвращает финальные значения (учитывает URL приоритетно)
   function getFinalData() {
     try {
       const urlParams = Utils.getUrlParams();
       const stored = Storage.get() || {};
       const out = {};
 
-      // utm
       FIELDS.utm.forEach(k => {
-        const uv = urlParams.get(k);
-        out[k] = (uv && uv.trim()) ? uv.trim() : (stored[k] || null);
+        const uv = urlParams.get ? urlParams.get(k) : null;
+        out[k] = (uv && String(uv).trim()) ? String(uv).trim() : (stored[k] || null);
       });
 
-      // clicks
       FIELDS.clicks.forEach(k => {
-        const uv = urlParams.get(k);
-        out[k] = (uv && uv.trim()) ? uv.trim() : (stored[k] || null);
+        const uv = urlParams.get ? urlParams.get(k) : null;
+        out[k] = (uv && String(uv).trim()) ? String(uv).trim() : (stored[k] || null);
       });
 
-      // fb
       FIELDS.fb.forEach(k => {
-        const uv = urlParams.get(k);
-        out[k] = (uv && uv.trim()) ? uv.trim() : (stored[k] || null);
+        const uv = urlParams.get ? urlParams.get(k) : null;
+        out[k] = (uv && String(uv).trim()) ? String(uv).trim() : (stored[k] || null);
       });
 
-      // google client id
       out.google_client_id = readGoogleClientIdFromCookie() || stored.google_client_id || null;
 
-      // page_url
-      const exclude = [...FIELDS.utm, ...FIELDS.clicks, ...FIELDS.fb, 'epik'];
+      const exclude = [].concat(FIELDS.utm, FIELDS.clicks, FIELDS.fb, ['epik']);
       out.page_url = Utils.getPageUrlWithoutParams(exclude) || stored.page_url || window.location.href;
 
-      // form name will be set at fill time
       out.form_name = null;
-
       return out;
     } catch (e) {
       return Storage.get() || {};
     }
   }
 
-  // Заполнение полей формы (ищем элементы по классам, как договорились)
-  function fillHiddenFields(form) {
-    if (!form || typeof form.querySelector !== 'function') return;
-    try {
-      const data = getFinalData();
-
-      // UTM
-      FIELDS.utm.forEach(k => {
-        try { setFieldValue(form, '.' + k, data[k]); } catch (e) {}
-      });
-
-      // Click IDs
-      FIELDS.clicks.forEach(k => {
-        try { setFieldValue(form, '.' + k, data[k]); } catch (e) {}
-      });
-
-      // FB
-      FIELDS.fb.forEach(k => {
-        try { setFieldValue(form, '.' + k, data[k]); } catch (e) {}
-      });
-
-      // google client id
-      try { setFieldValue(form, '.google_client_id', data.google_client_id); } catch (e) {}
-
-      // page url
-      try { setFieldValue(form, '.page_url', data.page_url); } catch (e) {}
-
-      // form name / id / data-name
-      try {
-        const formName = form.getAttribute('data-name') || form.getAttribute('name') || form.id || '';
-        setFieldValue(form, '.form_name', formName);
-      } catch (e) {}
-
-      // обновляем локально сохранённые данные (на случай, если URL содержал новые params)
-      try {
-        const toStore = Storage.get() || {};
-        // записываем только существуютие ключи из getFinalData (чтобы не ломать)
-        Object.assign(toStore, {
-          utm_source: data.utm_source || toStore.utm_source,
-          utm_medium: data.utm_medium || toStore.utm_medium,
-          utm_campaign: data.utm_campaign || toStore.utm_campaign,
-          utm_content: data.utm_content || toStore.utm_content,
-          utm_term: data.utm_term || toStore.utm_term,
-          gclid: data.gclid || toStore.gclid,
-          fbclid: data.fbclid || toStore.fbclid,
-          ttclid: data.ttclid || toStore.ttclid,
-          fbp: data.fbp || toStore.fbp,
-          fbc: data.fbc || toStore.fbc,
-          google_client_id: data.google_client_id || toStore.google_client_id,
-          page_url: data.page_url || toStore.page_url
-        });
-        Storage.set(toStore);
-      } catch (e) {}
-
-    } catch (e) {
-      safeLog('fillHiddenFields top error', e);
-    }
-  }
-
+  // Записывает value в все элементы, подходящие под selector внутри form
   function setFieldValue(form, selector, value) {
     try {
-      if (!form || typeof form.querySelector !== 'function') return false;
-      const el = form.querySelector(selector);
-      if (!el) return false;
-      // если это input/textarea/select — установим value; иначе атрибут value
-      try {
-        if ('value' in el) el.value = value != null ? String(value) : '';
-        else el.setAttribute('value', value != null ? String(value) : '');
-      } catch (e) {
-        try { el.setAttribute('value', value != null ? String(value) : ''); } catch (ee) {}
+      if (!form || typeof form.querySelectorAll !== 'function') return false;
+      const nodes = form.querySelectorAll(selector);
+      if (!nodes || nodes.length === 0) return false;
+      const v = value != null ? String(value) : '';
+      for (var i = 0; i < nodes.length; i++) {
+        const el = nodes[i];
+        try {
+          if ('value' in el) el.value = v;
+          else el.setAttribute && el.setAttribute('value', v);
+        } catch (e) {
+          try { el.setAttribute && el.setAttribute('value', v); } catch (ee) {}
+        }
       }
       return true;
     } catch (e) {
@@ -297,15 +260,52 @@
     }
   }
 
-  // Инициализация форм: заполняем существующие и ставим слушатель submit
+  function fillHiddenFields(form) {
+    if (!form || typeof form.querySelector !== 'function') return;
+    try {
+      const data = getFinalData();
+
+      // utm
+      FIELDS.utm.forEach(k => { try { setFieldValue(form, '.' + k, data[k]); } catch (e) {} });
+
+      // clicks
+      FIELDS.clicks.forEach(k => { try { setFieldValue(form, '.' + k, data[k]); } catch (e) {} });
+
+      // fb
+      FIELDS.fb.forEach(k => { try { setFieldValue(form, '.' + k, data[k]); } catch (e) {} });
+
+      // google client id
+      try { setFieldValue(form, '.google_client_id', data.google_client_id); } catch (e) {}
+
+      // page_url
+      try { setFieldValue(form, '.page_url', data.page_url); } catch (e) {}
+
+      // form name
+      try {
+        const formName = form.getAttribute('data-name') || form.getAttribute('name') || form.id || '';
+        setFieldValue(form, '.form_name', formName);
+      } catch (e) {}
+
+      // сохраняем текущий snapshot в localStorage (без перезаписи пустыми)
+      try {
+        const stored = Storage.get() || {};
+        var keys = ['utm_source','utm_medium','utm_campaign','utm_content','utm_term','gclid','fbclid','ttclid','fbp','fbc','google_client_id','page_url'];
+        keys.forEach(function(k) {
+          if (data[k]) stored[k] = data[k];
+        });
+        Storage.set(stored);
+      } catch (e) {}
+
+    } catch (e) {}
+  }
+
   function initForms() {
     try {
-      const forms = document.querySelectorAll ? document.querySelectorAll('form') : [];
-      Array.prototype.forEach.call(forms, function (f) {
-        try { fillHiddenFields(f); } catch (e) {}
-      });
+      var forms = document.querySelectorAll ? document.querySelectorAll('form') : [];
+      for (var i = 0; i < forms.length; i++) {
+        try { fillHiddenFields(forms[i]); } catch (e) {}
+      }
 
-      // На отправке формы ещё раз подставляем актуальные значения
       try {
         document.addEventListener('submit', function (ev) {
           try {
@@ -315,47 +315,29 @@
           } catch (e) {}
         }, true);
       } catch (e) {}
-
-    } catch (e) {
-      safeLog('initForms error', e);
-    }
+    } catch (e) {}
   }
 
-  // Публичные функции (не перезаписываем если уже есть)
   if (!window.wf_getUtmMinimalData) {
     window.wf_getUtmMinimalData = function () {
-      try {
-        return getFinalData();
-      } catch (e) {
-        return {};
-      }
+      try { return getFinalData(); } catch (e) { return {}; }
     };
   }
 
   if (!window.wf_fillFormWithUtm) {
     window.wf_fillFormWithUtm = function (form) {
-      try {
-        fillHiddenFields(form);
-        return true;
-      } catch (e) {
-        return false;
-      }
+      try { fillHiddenFields(form); return true; } catch (e) { return false; }
     };
   }
 
-  // Запускаем сбор (читать и сохранить)
-  try {
-    initTrackingData();
-  } catch (e) {}
+  try { initTrackingData(); } catch (e) {}
 
-  // Инициализируем формы после загрузки DOM
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initForms);
   } else {
     initForms();
   }
 
-  // небольшая дополнительная попытка после load (чтобы снизить race conditions с async виджетами)
   try {
     window.addEventListener('load', function () {
       try { setTimeout(initForms, 50); } catch (e) {}

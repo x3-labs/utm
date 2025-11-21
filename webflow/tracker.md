@@ -59,7 +59,7 @@
 Скопируйте код
 
 ```javascript
-<script src="https://ваш-домен.com/webflow-utm-tracker.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/x3-labs/utm/webflow/tracker.min.js"></script>
 ```
 
 И вставьте в:
